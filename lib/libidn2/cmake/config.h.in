@@ -1,0 +1,17 @@
+#pragma once
+
+/* CMake-generated config.h for libidn2 overlay */
+
+#cmakedefine HAVE_LANGINFO_H 1
+#cmakedefine HAVE_NL_LANGINFO 1
+#cmakedefine HAVE_CODESET 1
+
+#cmakedefine HAVE_SYMVER_ALIAS_SUPPORT 1
+
+/* Match upstream: disable VLA usage in gettext.h */
+#define GNULIB_NO_VLA 1
+
+/* libtool-ish version info (best-effort; update if you track upstream ABI) */
+#define LIBIDN2_LT_CURRENT 4
+#define LIBIDN2_LT_REVISION 0
+#define LIBIDN2_LT_AGE 4
