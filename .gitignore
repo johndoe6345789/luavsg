@@ -1,7 +1,6 @@
 
 cmake_uninstall.cmake
 
-lib/
 bin/
 
 *.pc
