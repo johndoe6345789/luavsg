@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/bzip2Targets.cmake")
+
+# Back-compat common imported target name used by FindBZip2.cmake users
+if(NOT TARGET BZip2::BZip2 AND TARGET bz2)
+  add_library(BZip2::BZip2 ALIAS bz2)
+endif()
+
+check_required_components(bzip2)
