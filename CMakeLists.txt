@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
 # Enable modern find_package() behavior for <PackageName>_ROOT hints.
-# This suppresses the CMP0074 warnings you are seeing and makes *_ROOT work.
 cmake_policy(SET CMP0074 NEW)
 
 project(MyFirstVsgApplication
@@ -27,11 +26,17 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 option(LUAVSG_ENABLE_VSGXCHANGE "Build vsgXchange subproject" ON)
 
 # If ON, we aggressively turn off optional vsgXchange plugins that tend to drag
-# in large dependency trees. Turn this OFF once you are ready to hunt deps.
+# in large dependency trees.
 option(LUAVSG_VSGXCHANGE_MINIMAL
     "Disable most vsgXchange plugins (easier first build)"
     ON
 )
+
+# B.2 mode: force vendored deps to be built as subprojects.
+option(LUAVSG_VENDORED_DEPS "Build vendored deps (draco/curl/freetype/KTX)" ON)
+
+# For curl, keep dependencies minimal on Windows.
+option(LUAVSG_CURL_MINIMAL "Configure curl for minimal dependency surface" ON)
 
 # -----------------------------------------------------------------------------
 # Helper: set cache values only if caller did not provide them
@@ -40,6 +45,29 @@ option(LUAVSG_VSGXCHANGE_MINIMAL
 function(_luavsg_cache_default name type value)
     if(NOT DEFINED ${name} OR "${${name}}" STREQUAL "")
         set(${name} "${value}" CACHE ${type} "" FORCE)
+    endif()
+endfunction()
+
+# -----------------------------------------------------------------------------
+# Helper: safe add_subdirectory for optional vendored deps
+# -----------------------------------------------------------------------------
+
+function(_luavsg_add_subdir name relpath bindir)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/${relpath}/CMakeLists.txt")
+        message(STATUS "luavsg: using vendored ${name} from ${relpath}")
+        add_subdirectory(
+            "${CMAKE_SOURCE_DIR}/${relpath}"
+            "${CMAKE_BINARY_DIR}/${bindir}"
+        )
+        set(${name}_VENDORED ON PARENT_SCOPE)
+    else()
+        set(${name}_VENDORED OFF PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(_luavsg_alias_if_target alias existing)
+    if(TARGET "${existing}" AND NOT TARGET "${alias}")
+        add_library("${alias}" ALIAS "${existing}")
     endif()
 endfunction()
 
@@ -84,14 +112,16 @@ set(_vulkan_lib "${_vulkan_lib_dir}/vulkan-1.lib")
 
 if(NOT EXISTS "${_vulkan_include}/vulkan/vulkan.h")
     message(FATAL_ERROR
-        "Vulkan headers not found at: ${_vulkan_include}/vulkan/vulkan.h\n"
+        "Vulkan headers not found at: ${_vulkan_include}/vulkan/vulkan.h
+"
         "VULKAN_SDK is: ${VULKAN_SDK}"
     )
 endif()
 
 if(NOT EXISTS "${_vulkan_lib}")
     message(FATAL_ERROR
-        "Vulkan import library not found at: ${_vulkan_lib}\n"
+        "Vulkan import library not found at: ${_vulkan_lib}
+"
         "VULKAN_SDK is: ${VULKAN_SDK}"
     )
 endif()
@@ -106,29 +136,64 @@ message(STATUS "Vulkan include:  ${Vulkan_INCLUDE_DIR}")
 message(STATUS "Vulkan library:  ${Vulkan_LIBRARY}")
 
 # -----------------------------------------------------------------------------
-# Dependency hints (vendored source trees)
+# B.2: Vendored deps as subprojects (avoid find_package(Config) gaps)
 # -----------------------------------------------------------------------------
-# These do NOT magically build the deps; they just help find_package() when the
-# dependency provides a CMake config/package, or when the project supports *_ROOT.
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/lib/curl/CMakeLists.txt")
-    _luavsg_cache_default(CURL_ROOT PATH "${CMAKE_SOURCE_DIR}/lib/curl")
-endif()
+if(LUAVSG_VENDORED_DEPS)
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/lib/freetype/CMakeLists.txt")
-    _luavsg_cache_default(FREETYPE_ROOT PATH "${CMAKE_SOURCE_DIR}/lib/freetype")
-endif()
+    # Draco
+    _luavsg_add_subdir(draco lib/draco _deps/draco)
+    _luavsg_alias_if_target(draco::draco draco)
+    _luavsg_alias_if_target(draco::draco draco_static)
+    _luavsg_alias_if_target(draco::draco draco_shared)
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/lib/KTX/CMakeLists.txt")
-    _luavsg_cache_default(KTX_ROOT PATH "${CMAKE_SOURCE_DIR}/lib/KTX")
-endif()
+    # Freetype
+    # Freetype CMake build is under builds/cmake in many distributions.
+    if(EXISTS "${CMAKE_SOURCE_DIR}/lib/freetype/builds/cmake/CMakeLists.txt")
+        message(STATUS "luavsg: using vendored freetype from lib/freetype/builds/cmake")
+        add_subdirectory(
+            "${CMAKE_SOURCE_DIR}/lib/freetype/builds/cmake"
+            "${CMAKE_BINARY_DIR}/_deps/freetype"
+        )
+        set(freetype_VENDORED ON)
+    else()
+        _luavsg_add_subdir(freetype lib/freetype _deps/freetype)
+    endif()
+    _luavsg_alias_if_target(Freetype::Freetype freetype)
+    _luavsg_alias_if_target(Freetype::Freetype freetype-static)
+    _luavsg_alias_if_target(Freetype::Freetype freetype-lib)
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/lib/draco/CMakeLists.txt")
-    _luavsg_cache_default(DRACO_ROOT PATH "${CMAKE_SOURCE_DIR}/lib/draco")
-endif()
+    # KTX
+    _luavsg_add_subdir(ktx lib/KTX _deps/ktx)
+    _luavsg_alias_if_target(Ktx::ktx ktx)
+    _luavsg_alias_if_target(KTX::ktx ktx)
+    _luavsg_alias_if_target(Ktx::ktx libktx)
+    _luavsg_alias_if_target(KTX::ktx libktx)
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/lib/glslang/CMakeLists.txt")
-    _luavsg_cache_default(glslang_ROOT PATH "${CMAKE_SOURCE_DIR}/lib/glslang")
+    # curl
+    if(LUAVSG_CURL_MINIMAL)
+        # Keep curl from pulling in a dependency cascade.
+        _luavsg_cache_default(BUILD_CURL_EXE BOOL OFF)
+        _luavsg_cache_default(BUILD_SHARED_LIBS BOOL OFF)
+        _luavsg_cache_default(CURL_USE_SCHANNEL BOOL ON)
+        _luavsg_cache_default(CURL_USE_OPENSSL BOOL OFF)
+        _luavsg_cache_default(CURL_ZLIB BOOL OFF)
+        _luavsg_cache_default(CURL_DISABLE_LDAP BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_LDAPS BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_RTSP BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_DICT BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_TELNET BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_TFTP BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_POP3 BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_IMAP BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_SMTP BOOL ON)
+        _luavsg_cache_default(CURL_DISABLE_GOPHER BOOL ON)
+    endif()
+    _luavsg_add_subdir(curl lib/curl _deps/curl)
+    _luavsg_alias_if_target(CURL::libcurl libcurl)
+    _luavsg_alias_if_target(CURL::libcurl libcurl_static)
+    _luavsg_alias_if_target(CURL::libcurl libcurl_shared)
+
 endif()
 
 # -----------------------------------------------------------------------------
@@ -165,6 +230,9 @@ if(LUAVSG_ENABLE_VSGXCHANGE AND EXISTS "${CMAKE_SOURCE_DIR}/lib/vsgXchange/CMake
         _luavsg_cache_default(vsgXchange_WITH_OPENEXR BOOL OFF)
         _luavsg_cache_default(vsgXchange_WITH_DRACO BOOL OFF)
     endif()
+
+    # Tell vsgXchange to prefer vendored deps when packages aren't installed.
+    _luavsg_cache_default(VSGXCHANGE_USE_VENDORED_DEPS BOOL ${LUAVSG_VENDORED_DEPS})
 
     add_subdirectory(lib/vsgXchange)
     set(HAVE_VSGXCHANGE ON)
