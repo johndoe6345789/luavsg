@@ -218,19 +218,6 @@ cmake_dependent_option(FT_REQUIRE_BROTLI
 option(FT_ENABLE_ERROR_STRINGS
   "Enable support for meaningful error descriptions." OFF)
 
-# Disallow in-source builds
-if ("${CMAKE_BINARY_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
-  message(FATAL_ERROR
-    "In-source builds are not permitted!  Make a separate folder for"
-    " building, e.g.,\n"
-    "  cmake -E make_directory build\n"
-    "  cmake -E chdir build cmake ..\n"
-    "Before that, remove the files created by this failed run with\n"
-    "  cmake -E remove CMakeCache.txt\n"
-    "  cmake -E remove_directory CMakeFiles")
-endif ()
-
-
 # Add local cmake modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/builds/cmake)
 
